@@ -1,64 +1,135 @@
-import Image from "next/image";
+'use client';
+
+import { useState, useEffect } from 'react';
+import Image from 'next/image';
+import { PlayerDashboard } from '@/app/components/PlayerDashboard';
+import { LoadingSpinner } from '@/app/components/LoadingSpinner';
+import { ErrorDisplay } from '@/app/components/ErrorDisplay';
+
+// 玩家数据类型
+interface PlayerData {
+  player: {
+    id: number;
+    username: string;
+    avatar_url: string;
+    country_code: string;
+    rank: number | null;
+    level: number;
+    level_progress: number;
+    pp: number;
+  };
+  stats: {
+    // 基础统计
+    play_count: number;
+    beatmap_playcounts_count: number;
+    ranked_score: number;
+    total_score: number;
+    play_time: number;
+    play_time_hours: number;
+
+    // 准确率和击打
+    hit_accuracy: number;
+    total_hits: number;
+    hits_per_play: number;
+    count_300: number;
+    count_100: number;
+    count_50: number;
+    count_miss: number;
+
+    // 连击和回放
+    maximum_combo: number;
+    replays_watched_by_others: number;
+
+    // 评分等级
+    grade_counts: {
+      ss?: number;
+      ssh?: number;
+      s?: number;
+      sh?: number;
+      a?: number;
+    };
+
+    // 奖章数
+    user_achievements_count: number;
+  };
+  completion: {
+    completed: number;
+    total: number;
+    percentage: number;
+  };
+  last_updated: string;
+}
 
 export default function Home() {
+  const [playerData, setPlayerData] = useState<PlayerData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchPlayerData();
+  }, []);
+
+  const fetchPlayerData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const response = await fetch('/api/osu/player');
+
+      if (!response.ok) {
+        throw new Error(`API请求失败: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      if (data.error) {
+        throw new Error(data.message || '获取数据失败');
+      }
+
+      setPlayerData(data);
+    } catch (err) {
+      console.error('获取玩家数据失败:', err);
+      setError(err instanceof Error ? err.message : '未知错误');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRetry = () => {
+    fetchPlayerData();
+  };
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-black font-sans">
+
+
+      <main className="container mx-auto px-4 py-8">
+        {/* 页面标题 */}
+        <div className="mb-10 text-center">
+          <h2 className="text-3xl md:text-4xl font-bold text-gray-900 dark:text-white mb-3">
+            进度追踪器
+          </h2>
+
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
+
+        {/* 主要内容区域 */}
+        {loading ? (
+          <div className="flex justify-center items-center min-h-[400px]">
+            <LoadingSpinner />
+          </div>
+        ) : error ? (
+          <div className="flex justify-center items-center min-h-[400px]">
+            <ErrorDisplay message={error} onRetry={handleRetry} />
+          </div>
+        ) : playerData ? (
+          <PlayerDashboard data={playerData} />
+        ) : (
+          <div className="text-center py-10">
+            <p className="text-gray-500 dark:text-gray-400">暂无数据</p>
+          </div>
+        )}
+
+
       </main>
     </div>
   );
