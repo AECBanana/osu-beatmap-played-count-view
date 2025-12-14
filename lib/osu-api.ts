@@ -183,3 +183,31 @@ export async function getPlayerIdByUsername(username: string) {
         throw error;
     }
 }
+
+/**
+ * 检查玩家是否有特定谱面的分数
+ * @param beatmapId 谱面ID
+ * @returns 如果有分数返回true，否则返回false
+ */
+export async function hasPlayerBeatmapScore(beatmapId: number): Promise<boolean> {
+    try {
+        if (!beatmapId || beatmapId <= 0) {
+            return false;
+        }
+
+        const client = await getAuthenticatedClient();
+        const response = await client.get(`/beatmaps/${beatmapId}/scores/users/${OSU_PLAYER_ID}`);
+
+        // 如果API返回成功且有数据，说明玩家有分数
+        return response.data !== null && response.data.score !== undefined;
+    } catch (error: any) {
+        // 如果错误状态码是404，说明玩家没有这个谱面的分数
+        if (error.response?.status === 404) {
+            return false;
+        }
+
+        // 其他错误，记录并返回false
+        console.error(`检查谱面 ${beatmapId} 分数失败:`, error);
+        return false;
+    }
+}
