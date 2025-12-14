@@ -1,6 +1,6 @@
 import { TosuWebSocketResponse, SimplifiedTosuState } from './tosu-types';
 
-export type TosuGameState = 'Menu' | 'Playing' | 'ResultsScreen' | 'Editing' | 'SongSelect' | 'Watching' | 'Unknown';
+export type TosuGameState = 'menu' | 'play' | 'resultScreen' | 'resultsScreen' | 'editing' | 'selectPlay' | 'watching' | 'unknown';
 
 export interface TosuClientOptions {
     url?: string;
@@ -21,9 +21,9 @@ export class TosuClient {
     private reconnectInterval: number;
     private reconnectTimer: NodeJS.Timeout | null = null;
     private isConnecting = false;
-    private lastState: TosuGameState = 'Unknown';
+    private lastState: TosuGameState = 'unknown';
     private currentState: SimplifiedTosuState = {
-        gameState: 'Unknown',
+        gameState: 'unknown',
         isPlaying: false,
         isResultsScreen: false,
     };
@@ -35,6 +35,9 @@ export class TosuClient {
     private onConnected?: () => void;
     private onDisconnected?: () => void;
     private onError?: (error: Error) => void;
+
+    // 谱面分数缓存
+    private beatmapScoreCache: Map<number, boolean> = new Map();
 
     constructor(options: TosuClientOptions = {}) {
         this.url = options.url || 'ws://127.0.0.1:24050/websocket/v2';
@@ -178,11 +181,57 @@ export class TosuClient {
     }
 
     /**
+     * 检查玩家是否有特定谱面的分数
+     * @param beatmapId 谱面ID
+     * @returns 如果有分数返回true，否则返回false
+     */
+    private async checkBeatmapScore(beatmapId: number): Promise<boolean> {
+        if (!beatmapId || beatmapId <= 0) {
+            return false;
+        }
+
+        // 检查缓存
+        if (this.beatmapScoreCache.has(beatmapId)) {
+            return this.beatmapScoreCache.get(beatmapId)!;
+        }
+
+        try {
+            const response = await fetch(`/api/osu/beatmap/${beatmapId}/score`);
+
+            if (!response.ok) {
+                throw new Error(`API请求失败: ${response.status}`);
+            }
+
+            const result = await response.json();
+
+            if (result.error) {
+                console.error(`检查谱面 ${beatmapId} 分数失败:`, result.message);
+                // 缓存错误结果，避免重复请求
+                this.beatmapScoreCache.set(beatmapId, false);
+                return false;
+            }
+
+            const hasScore = result.hasScore;
+            // 缓存结果
+            this.beatmapScoreCache.set(beatmapId, hasScore);
+            return hasScore;
+        } catch (error: any) {
+            console.error(`检查谱面 ${beatmapId} 分数失败:`, error);
+            // 缓存错误结果，避免重复请求
+            this.beatmapScoreCache.set(beatmapId, false);
+            return false;
+        }
+    }
+
+    /**
      * 处理 tosu 数据并检测状态变化
      */
     private processTosuData(data: TosuWebSocketResponse): void {
         const newGameState = data.state.name as TosuGameState;
         const prevGameState = this.lastState;
+
+        // 调试日志：显示状态变化
+        // console.log(`状态变化: ${prevGameState} -> ${newGameState}`);
 
         // 更新最后状态
         this.lastState = newGameState;
@@ -190,13 +239,14 @@ export class TosuClient {
         // 构建简化状态
         const simplifiedState: SimplifiedTosuState = {
             gameState: newGameState,
-            isPlaying: newGameState === 'Playing',
-            isResultsScreen: newGameState === 'ResultsScreen',
+            isPlaying: newGameState === 'play',
+            isResultsScreen: newGameState === 'resultScreen' || newGameState === 'resultsScreen',
         };
 
         // 添加谱面信息
         if (data.beatmap && data.beatmap.title) {
             simplifiedState.currentBeatmap = {
+                id: data.beatmap.id || 0,
                 title: data.beatmap.title,
                 artist: data.beatmap.artist,
                 mapper: data.beatmap.mapper,
@@ -229,27 +279,45 @@ export class TosuClient {
         this.currentState = simplifiedState;
 
         // 检测play状态开始事件
-        if (prevGameState !== 'Playing' && newGameState === 'Playing') {
+        if (prevGameState !== 'play' && newGameState === 'play') {
             console.log('检测到play状态开始！');
+            console.log('完整数据:', JSON.stringify(data, null, 2));
             if (this.onPlayStarted) {
                 // 获取谱面ID，如果没有则使用0
                 const beatmapId = data.beatmap?.id || 0;
                 // 获取mods信息
                 const mods = data.play?.mods;
+                console.log('谱面ID:', beatmapId);
+                console.log('Mods信息:', mods);
                 this.onPlayStarted(beatmapId, mods);
             }
         }
 
-        // 检测歌曲完成事件
-        if (prevGameState === 'Playing' && newGameState === 'ResultsScreen') {
-            console.log('检测到歌曲完成！');
+        // 检测歌曲完成事件 - 只检测真正的完成状态
+        if (prevGameState === 'play' && newGameState === 'resultScreen') {
+            console.log(`检测到歌曲完成！从 ${prevGameState} 到 ${newGameState}`);
+
+            // 检查是否有resultsScreen数据
+            if (data.resultsScreen) {
+                console.log('有resultsScreen数据:', JSON.stringify(data.resultsScreen, null, 2));
+            }
+
             if (this.onSongCompleted) {
                 // 获取谱面ID，如果没有则使用0
                 const beatmapId = data.beatmap?.id || 0;
-                // 简化逻辑：假设每次完成都是新的（实际应该检查玩家是否已有此谱面的分数）
-                // 这里我们无法知道玩家是否已经有此谱面的分数，所以暂时假设是新的
-                const isNewCompletion = true;
-                this.onSongCompleted(beatmapId, isNewCompletion);
+                console.log(`歌曲完成，谱面ID: ${beatmapId}`);
+
+                // 检查玩家是否已经有此谱面的分数
+                this.checkBeatmapScore(beatmapId).then(hasScore => {
+                    // 如果没有分数，说明是新的完成
+                    const isNewCompletion = !hasScore;
+                    console.log(`谱面 ${beatmapId} 是否是新完成: ${isNewCompletion} (已有分数: ${hasScore})`);
+                    this.onSongCompleted!(beatmapId, isNewCompletion);
+                }).catch(error => {
+                    console.error(`检查谱面 ${beatmapId} 分数失败:`, error);
+                    // 如果检查失败，保守起见假设不是新的完成
+                    this.onSongCompleted!(beatmapId, false);
+                });
             }
         }
 
@@ -267,12 +335,13 @@ export class TosuClient {
 
         const simplified: SimplifiedTosuState = {
             gameState,
-            isPlaying: gameState === 'Playing',
-            isResultsScreen: gameState === 'ResultsScreen',
+            isPlaying: gameState === 'play',
+            isResultsScreen: gameState === 'resultScreen' || gameState === 'resultsScreen',
         };
 
         if (data.beatmap && data.beatmap.title) {
             simplified.currentBeatmap = {
+                id: data.beatmap.id || 0,
                 title: data.beatmap.title,
                 artist: data.beatmap.artist,
                 mapper: data.beatmap.mapper,

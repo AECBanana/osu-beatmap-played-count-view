@@ -457,6 +457,7 @@ export interface SimplifiedTosuState {
     isPlaying: boolean;
     isResultsScreen: boolean;
     currentBeatmap?: {
+        id: number;
         title: string;
         artist: string;
         mapper: string;
